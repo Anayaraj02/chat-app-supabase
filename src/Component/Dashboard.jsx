@@ -10,16 +10,14 @@ export default function Dashboard() {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [onlineUsers, setOnlineUsers] = useState(new Set());
-  const [lastOpened, setLastOpened] = useState({}); // 👈 tracks last open per user
+  // const [lastOpened, setLastOpened] = useState({});
   const scrollRef = useRef(null);
 
   // ✅ Check session
   useEffect(() => {
     const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
         navigate("/login");
         return;
       }
@@ -29,7 +27,19 @@ export default function Dashboard() {
     checkSession();
   }, [navigate]);
 
-  // 🧠 Fetch users
+  // ✅ Keep updating current user's online status
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(async () => {
+      await supabase
+        .from("profiles")
+        .update({ last_online: new Date().toISOString() })
+        .eq("id", user.id);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // ✅ Fetch all users
   useEffect(() => {
     if (!user) return;
     const fetchUsers = async () => {
@@ -43,7 +53,7 @@ export default function Dashboard() {
     fetchUsers();
   }, [user]);
 
-  // 🚀 Fetch messages + mark seen
+  // ✅ Fetch and subscribe to messages
   useEffect(() => {
     if (!selectedUser || !user) return;
 
@@ -55,12 +65,12 @@ export default function Dashboard() {
         .in("receiver_id", [user.id, selectedUser.id])
         .order("created_at", { ascending: true });
 
-      if (error) return console.error("Error fetching:", error.message);
+      if (error) return console.error("Fetch error:", error.message);
       setMessages(data || []);
 
-      // ✅ Mark seen for this chat
+      // mark unseen as seen
       const unseen = data.filter(
-        (msg) => msg.sender_id === selectedUser.id && !msg.seen
+        (m) => m.sender_id === selectedUser.id && !m.seen
       );
       if (unseen.length > 0) {
         await supabase
@@ -69,36 +79,45 @@ export default function Dashboard() {
           .eq("sender_id", selectedUser.id)
           .eq("receiver_id", user.id)
           .eq("seen", false);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.sender_id === selectedUser.id ? { ...m, seen: true } : m
-          )
-        );
       }
-
-      // ✅ Track when user opened this chat
-      setLastOpened((prev) => ({
-        ...prev,
-        [selectedUser.id]: new Date().toISOString(),
-      }));
     };
 
     fetchMessages();
 
-    // 🔄 Realtime
+    // realtime updates
     const channel = supabase
-      .channel("realtime-chat")
+      .channel("chat-realtime")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
-        (payload) => {
+        async (payload) => {
           const msg = payload.new;
           if (
-            (msg.sender_id === user.id && msg.receiver_id === selectedUser.id) ||
+            (msg.sender_id === user.id &&
+              msg.receiver_id === selectedUser.id) ||
             (msg.sender_id === selectedUser.id && msg.receiver_id === user.id)
           ) {
             setMessages((prev) => [...prev, msg]);
+            // mark as seen if current chat open
+            if (msg.sender_id === selectedUser.id) {
+              await supabase
+                .from("messages")
+                .update({ seen: true })
+                .eq("sender_id", selectedUser.id)
+                .eq("receiver_id", user.id)
+                .eq("seen", false);
+            }
           }
+          // reorder chats when new message arrives
+          setChats((prev) => {
+            const moved = [...prev];
+            const index = moved.findIndex((u) => u.id === msg.sender_id);
+            if (index !== -1) {
+              const [chat] = moved.splice(index, 1);
+              moved.unshift(chat);
+            }
+            return moved;
+          });
         }
       )
       .subscribe();
@@ -106,41 +125,44 @@ export default function Dashboard() {
     return () => supabase.removeChannel(channel);
   }, [selectedUser, user]);
 
-  // 🟢 Online users
-  useEffect(() => {
-    if (!user) return;
-
-    const updateOnline = async () => {
-      await supabase
-        .from("profiles")
-        .update({ last_online: new Date().toISOString() })
-        .eq("id", user.id);
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, last_online");
-      if (error || !data) return;
-
-      const now = new Date();
-      const online = new Set(
-        data
-          .filter((u) => now - new Date(u.last_online) < 90 * 1000)
-          .map((u) => u.id)
-      );
-      setOnlineUsers(online);
-    };
-
-    updateOnline();
-    const interval = setInterval(updateOnline, 10000);
-    return () => clearInterval(interval);
-  }, [user]);
-
-  // Scroll down
+  // ✅ Auto scroll bottom
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ✉️ Send message
+  // ✅ Compute online users
+  // ⚡ Live online/offline presence
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase.channel("online-users", {
+      config: {
+        presence: {
+          key: user.id,
+        },
+      },
+    });
+
+    // 👋 Listen for presence changes
+    channel
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState();
+        const onlineIds = new Set(Object.keys(state));
+        setOnlineUsers(onlineIds);
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({ online_at: new Date().toISOString() });
+        }
+      });
+
+    return () => {
+      channel.untrack();
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+  // ✅ Send message
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
@@ -148,31 +170,26 @@ export default function Dashboard() {
     const msg = {
       sender_id: user.id,
       receiver_id: selectedUser.id,
-      content: newMessage,
+      content: newMessage.trim(),
       created_at: new Date().toISOString(),
       seen: false,
     };
-    setMessages((prev) => [...prev, msg]);
-    setNewMessage("");
 
+    setNewMessage("");
     const { error } = await supabase.from("messages").insert(msg);
     if (error) console.error("Send error:", error.message);
   };
 
-  // 🔢 Unread count (only latest unseen messages since last open)
+  // ✅ Unread indicator
   const unreadCount = (id) => {
-    const lastSeen = lastOpened[id];
-    const relevant = messages.filter(
-      (m) =>
-        m.sender_id === id &&
-        m.receiver_id === user?.id &&
-        !m.seen &&
-        (!lastSeen || new Date(m.created_at) > new Date(lastSeen))
+    if (selectedUser?.id === id) return 0;
+    const unseen = messages.filter(
+      (m) => m.sender_id === id && !m.seen && m.receiver_id === user?.id
     );
-    return relevant.length > 0 ? 1 : 0; // 👈 only "1" if new message exists
+    return unseen.length;
   };
 
-  // 🚪 Logout + mark offline
+  // ✅ Logout
   const handleLogout = async () => {
     if (user) {
       await supabase
@@ -219,9 +236,7 @@ export default function Dashboard() {
                     }`}
                   ></div>
                   <div>
-                    <div className="font-medium">
-                      {chat.name || chat.email}
-                    </div>
+                    <div className="font-medium">{chat.name || chat.email}</div>
                     <div className="text-xs text-gray-500">
                       {isOnline ? "Online" : "Offline"}
                     </div>
@@ -242,7 +257,7 @@ export default function Dashboard() {
       <div className="w-full md:w-[70%] flex flex-col">
         {!selectedUser ? (
           <div className="flex-1 flex items-center justify-center text-gray-400">
-            Select a user to chat 💬
+            👋 Welcome! Select a user to start chatting.
           </div>
         ) : (
           <>
@@ -253,14 +268,17 @@ export default function Dashboard() {
                   {selectedUser.name || selectedUser.email}
                 </span>
                 <div className="text-xs text-gray-400">
-                  {onlineUsers.has(selectedUser.id)
-                    ? "Online"
-                    : "Offline"}
+                  {onlineUsers.has(selectedUser.id) ? "Online" : "Offline"}
                 </div>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-indigo-50">
+              {messages.length === 0 && (
+                <div className="text-center text-gray-400 mt-10">
+                  👋 Say hi to start your conversation!
+                </div>
+              )}
               {messages.map((m, i) => (
                 <div
                   key={i}
