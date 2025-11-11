@@ -124,8 +124,10 @@ export default function Dashboard() {
 
           const isOpen =
             selectedUser &&
-            ((msg.sender_id === selectedUser.id && msg.receiver_id === user.id) ||
-              (msg.sender_id === user.id && msg.receiver_id === selectedUser.id));
+            ((msg.sender_id === selectedUser.id &&
+              msg.receiver_id === user.id) ||
+              (msg.sender_id === user.id &&
+                msg.receiver_id === selectedUser.id));
 
           if (isOpen) {
             setMessages((prev) =>
@@ -145,7 +147,8 @@ export default function Dashboard() {
             }));
           }
 
-          const partnerId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+          const partnerId =
+            msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
           setChats((prev) => {
             const copy = [...prev];
             const idx = copy.findIndex((c) => c.id === partnerId);
@@ -208,7 +211,9 @@ export default function Dashboard() {
         }`}
       >
         <div className="p-4 flex items-center justify-between border-b">
-          <span className="font-semibold text-indigo-700 text-sm md:text-base">{user?.email}</span>
+          <span className="font-semibold text-indigo-700 text-sm md:text-base">
+            {user?.email}
+          </span>
           <button
             onClick={handleLogout}
             className="text-sm text-red-500 hover:text-red-700"
@@ -220,27 +225,62 @@ export default function Dashboard() {
           {chats.map((chat) => {
             const isOnline = onlineUsers.has(chat.id);
             const unread = unreadCounts[chat.id] || 0;
+
+            // generate DP background color based on user name/email
+            const colors = [
+              "bg-indigo-400",
+              "bg-pink-400",
+              "bg-green-400",
+              "bg-yellow-400",
+              "bg-blue-400",
+              "bg-purple-400",
+              "bg-teal-400",
+            ];
+            const colorIndex =
+              ((chat.name || chat.email)?.charCodeAt(0) || 0) % colors.length;
+            const bgColor = colors[colorIndex];
+
             return (
               <div
                 key={chat.id}
                 onClick={() => openChat(chat)}
                 className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition ${
-                  selectedUser?.id === chat.id ? "bg-indigo-100" : "hover:bg-indigo-50"
+                  selectedUser?.id === chat.id
+                    ? "bg-indigo-100"
+                    : "hover:bg-indigo-50"
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      isOnline ? "bg-green-400" : "bg-gray-400"
-                    }`}
-                  ></div>
+                  {/* ✅ DP or Initial */}
+                  {chat.profile_image ? (
+                    <img
+                      src={chat.profile_image}
+                      alt="avatar"
+                      className="w-10 h-10 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className={`w-10 h-10 rounded-full ${bgColor} flex items-center justify-center text-white font-semibold text-lg`}
+                    >
+                      {(chat.name || chat.email)?.[0]?.toUpperCase()}
+                    </div>
+                  )}
+
                   <div>
-                    <div className="font-medium text-sm">{chat.name || chat.email}</div>
-                    <div className="text-xs text-gray-500">
+                    <div className="font-medium text-sm">
+                      {chat.name || chat.email}
+                    </div>
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      <span
+                        className={`inline-block w-2 h-2 rounded-full ${
+                          isOnline ? "bg-green-400" : "bg-gray-400"
+                        }`}
+                      ></span>
                       {isOnline ? "Online" : "Offline"}
                     </div>
                   </div>
                 </div>
+
                 {unread > 0 && (
                   <span className="bg-indigo-600 text-white text-xs px-2 py-1 rounded-full">
                     {unread}
@@ -268,6 +308,33 @@ export default function Dashboard() {
               >
                 ←
               </button>
+
+              {/* Avatar */}
+              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-white font-bold text-sm overflow-hidden">
+                {selectedUser.gender === "male" && (
+                  <img
+                    src="https://avatar.iran.liara.run/public/boy"
+                    alt="Male Avatar"
+                    className="w-full h-full object-cover"
+                  />
+                )}
+                {selectedUser.gender === "female" && (
+                  <img
+                    src="https://avatar.iran.liara.run/public/girl"
+                    alt="Female Avatar"
+                    className="w-full h-full object-cover"
+                  />
+                )}
+                {!selectedUser.gender && (
+                  // fallback: show initials
+                  <span>
+                    {selectedUser.name
+                      ? selectedUser.name.charAt(0).toUpperCase()
+                      : selectedUser.email.charAt(0).toUpperCase()}
+                  </span>
+                )}
+              </div>
+
               <div>
                 <div className="font-semibold text-sm md:text-base">
                   {selectedUser.name || selectedUser.email}
