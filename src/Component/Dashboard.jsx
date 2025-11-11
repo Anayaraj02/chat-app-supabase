@@ -346,39 +346,87 @@ export default function Dashboard() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-3 bg-indigo-50">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-indigo-50">
               {messages.length === 0 && (
-                <div className="text-center text-gray-400 mt-10 text-sm">
+                <div className="text-center text-gray-400 mt-10">
                   👋 Say hi to start your conversation!
                 </div>
               )}
-              {messages.map((m) => (
-                <div
-                  key={m.id}
-                  className={`flex flex-col ${
-                    m.sender_id === user.id ? "items-end" : "items-start"
-                  } mb-2`}
-                >
+
+              {messages.map((m) => {
+                const isSender = m.sender_id === user.id;
+
+                // Get sender info
+                const sender = isSender
+                  ? user
+                  : chats.find((c) => c.id === m.sender_id) || {
+                      name: "Unknown",
+                      gender: null,
+                    };
+
+                return (
                   <div
-                    className={`px-3 py-2 rounded-2xl text-sm md:text-base ${
-                      m.sender_id === user.id
-                        ? "bg-indigo-600 text-white"
-                        : "bg-white text-gray-800"
+                    key={m.id}
+                    className={`flex flex-col max-w-[70%] ${
+                      isSender ? "ml-auto items-end" : "mr-auto items-start"
                     }`}
                   >
-                    {m.content}
+                    {/* Sender Info */}
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-6 h-6 rounded-full overflow-hidden bg-gray-500 flex items-center justify-center text-white text-xs">
+                        {isSender ? (
+                          // Your own message: show first letter as DP
+                          <span>
+                            {user?.email?.charAt(0).toUpperCase() || "U"}
+                          </span>
+                        ) : sender.gender === "male" ? (
+                          <img
+                            src="https://avatar.iran.liara.run/public/boy"
+                            alt="Male Avatar"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : sender.gender === "female" ? (
+                          <img
+                            src="https://avatar.iran.liara.run/public/girl"
+                            alt="Female Avatar"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span>
+                            {sender.name?.charAt(0)?.toUpperCase() || "U"}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {isSender ? "You" : sender.name}
+                      </span>
+                    </div>
+
+                    {/* Message Bubble */}
+                    <div
+                      className={`px-4 py-2 rounded-2xl ${
+                        isSender
+                          ? "bg-indigo-600 text-white"
+                          : "bg-white text-gray-800"
+                      }`}
+                    >
+                      {m.content}
+                    </div>
+
+                    {/* Time + Seen */}
+                    <span className="text-xs text-gray-400 mt-1">
+                      {new Date(m.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                      {isSender && (
+                        <span className="ml-1">{m.seen ? " ✅✅" : " ✅"}</span>
+                      )}
+                    </span>
                   </div>
-                  <span className="text-[10px] text-gray-400 mt-1">
-                    {new Date(m.created_at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                    {m.sender_id === user.id && (
-                      <span className="ml-1">{m.seen ? "✅✅" : "✅"}</span>
-                    )}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
+
               <div ref={scrollRef}></div>
             </div>
 
